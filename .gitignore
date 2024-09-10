@@ -1,0 +1,12 @@
+**/__pycache__
+.env
+.DS_Store
+.ipynb_checkpoints
+.pytest_cache
+*.egg-info/ 
+.mypy_cache
+.tox/
+.coverage
+.coverage.*
+
+.venv/*
