@@ -1,4 +1,6 @@
-# Short Credit Spread
+# Short Credit Spread Strategy
+
+The actual signals are replaced with simple signals for public sharing. Use at your own risk.
 
 - short credit spread based on trend and volatility regimes
 - if trending up, short put spread, if trending down, short call spread.
