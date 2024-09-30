@@ -30,21 +30,21 @@ class Alerts(baseAlerts):
         self.services = services
     
     def info(self, message):
-        if services is None:
+        if self.services is None:
             cprint(message, "green")
         else:
             for services in self.services:
                 services.info(message)
     
     def error(self, message):
-        if services is None:
+        if self.services is None:
             cprint(message, "red")
         else:
             for services in self.services:
                 services.error(message)
     
     def warning(self, message):
-        if services is None:
+        if self.services is None:
             cprint(message, "yellow")
         else:
             for services in self.services:

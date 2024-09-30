@@ -9,7 +9,7 @@ from termcolor import cprint
 from ib_async import *
 from dotenv import dotenv_values
 from zoneinfo import ZoneInfo
-from utils.ibkr import specific_option_contract, convert_str_date, convert_tickers_to_full_chain, noChainFoundException
+from utils.ibkr import specific_option_contract, convert_tickers_to_full_chain, noChainFoundException
 from zoneinfo import ZoneInfo
 from utils.alerts import Alerts
 from utils.polygon import get_ticker_data, schedule_trading_dates
@@ -19,12 +19,12 @@ from utils.options import find_closest_strike
 def get_date_today(tz : str = "US/Eastern") -> str:
     """Return today date in yyyymmdd format"""
     dt = datetime.datetime.now(ZoneInfo(tz))
-    return dt.date().strftime("%Y-%m-%d")
+    return dt.date() # return dt.date().strftime("%Y-%m-%d")
 
 def is_market_open_today(ib: IB, underlying: Stock) -> bool:
     """Req contract details (liquidHours) return the following string
         20090507:0700-1830,1830-2330;20090508:CLOSED"""
-    today = get_date_today()
+    today = get_date_today().strftime("%Y%m%d")
     trading_days = ib.reqContractDetails(underlying)[0].liquidHours
     trading_days_dict = {d.split(':')[0]:d.split(':')[1] for d in trading_days.split(';')}
     for k,v in trading_days_dict.items():
@@ -34,8 +34,13 @@ def is_market_open_today(ib: IB, underlying: Stock) -> bool:
 
 class ShortCreditSpread:
     def __init__(self, auth_config, params, services = None):
+        # other params: MAX attempts
+        self.replace_cancelled_orders_attempt = 3
+        self.get_option_chain_attempt = 3
+        self.connect_attempt = 10
+
         # strategy details
-        self.today = get_date_today()
+        self.today = get_date_today().strftime("%Y-%m-%d")
         self.exp_date = self.today # 0dte
         self.params = params
         self.size = 1
@@ -54,10 +59,7 @@ class ShortCreditSpread:
         # services
         self.alerts = Alerts(services) 
 
-        # other params: MAX attempts
-        self.replace_cancelled_orders_attempt = 3
-        self.get_option_chain_attempt = 3
-        self.connect_attempt = 10
+        
 
         # tickers for polygon
         self.ticker = "I:SPX"
@@ -90,8 +92,9 @@ class ShortCreditSpread:
         delay = 30
         while True:
             try:
-                self.ib.connect(self.host, self.port,self.clientId)
+                self.ib.connect(self.host, self.port, self.clientId)
                 if self.ib.isConnected():
+                    print("connected")
                     break
             except Exception as e:
                 if curr_reconnect < self.connect_attempt:
@@ -147,6 +150,9 @@ class ShortCreditSpread:
         hist_underlying_data["3_mo_avg"] = hist_underlying_data["c"].rolling(window=60).mean()
         hist_underlying_data['regime'] = hist_underlying_data.apply(lambda row: 1 if (row['c'] > row['1_mo_avg']) else 0, axis=1)
         self.trend_regime = hist_underlying_data['regime'].iloc[-1]
+        cprint(f"trend regime: {self.trend_regime}", "green")
+
+        
 
     def compute_expected_move(self):
         # calculate expected move
@@ -154,12 +160,14 @@ class ShortCreditSpread:
         underlying_data.index = pd.to_datetime(underlying_data.index, unit="ms", utc=True).tz_convert("America/New_York")
 
         live_vix_data = get_ticker_data(self.vix_ticker, start_date = self.today, end_date= self.today, timespan = "minute", polygon_api_key=self.polygon_api_key)
+
         live_vix_data.index = pd.to_datetime(live_vix_data.index, unit="ms", utc=True).tz_convert("America/New_York")
         
         index_price = live_vix_data[live_vix_data.index.time >= pd.Timestamp("09:35").time()]["c"].iloc[0]
         price = underlying_data[underlying_data.index.time >= pd.Timestamp("09:35").time()]["c"].iloc[0]
 
         expected_move = (round((index_price / np.sqrt(252)), 2)/100) * self.dist_factor
+        cprint(f"Expected_move: {expected_move}", "red")
 
         if self.trend_regime == 1: # put
             self.right = "P"
@@ -170,7 +178,8 @@ class ShortCreditSpread:
             self.right = "C"
             self.short_strike = price + (price * expected_move)
             self.long_strike = self.short_strike + self.spread_width
-    
+
+        cprint(f"short strike: {self.short_strike}, long strike: {self.long_strike}", "red")
     def get_all_expirations(self):
             chains = self.ib.reqSecDefOptParams(self.underlying_contract.symbol, 
                                                 '', 
@@ -182,14 +191,14 @@ class ShortCreditSpread:
     
     def get_all_contracts(self):
         # exp_list = self.get_all_expirations()
-        expiration = convert_str_date(self.today) # exp_list[0]
+        expiration = self.today.replace("-", "") # exp_list[0] expiration only accepts YYYYMMDD
         ## SHORT LEG 
         short_cds = self.ib.reqContractDetails(
             Option(
                 symbol = self.underlying_contract.symbol, 
                 lastTradeDateOrContractMonth=expiration, 
                 right = self.right,
-                exchange = self.primary_exchange,  # for SPX, use SMART (primary exchange). By default, exchange is CBOE for SPX.
+                exchange = self.exchange,  # for SPX, use SMART (primary exchange). By default, exchange is CBOE for SPX.
                 tradingClass = self.trading_class)
             )
         self.contracts = self.ib.qualifyContracts(*[cd.contract for cd in short_cds])
@@ -223,7 +232,7 @@ class ShortCreditSpread:
         self.ib.schedule(datetime.datetime(int(self.today[:4]),int(self.today[5:7]), int(self.today[8:10]), 9, 0, 0, tzinfo =ZoneInfo("US/Eastern")),
                          self.compute_regimes)  
         # run strategy
-        self.ib.schedule(datetime.datetime(int(self.today[:4]),int(self.today[5:7]), int(self.today[8:10]), 9, 36, 0, tzinfo =ZoneInfo("US/Eastern")),
+        self.ib.schedule(datetime.datetime(int(self.today[:4]),int(self.today[5:7]), int(self.today[8:10]), 9, 37, 0, tzinfo =ZoneInfo("US/Eastern")),
                          self.run_strategy)        
         self.ib.schedule(datetime.datetime(int(self.today[:4]),int(self.today[5:7]), int(self.today[8:10]), 17, 0, 0, tzinfo =ZoneInfo("US/Eastern")), 
                          self.exit_program)
@@ -231,7 +240,7 @@ class ShortCreditSpread:
     
     def run_strategy(self):
         util.startLoop()
-        # Calculate expected move after 5 mins after market opens
+        # Calculate expected move after 5 mins after market opens 9:35
         self.compute_expected_move()
         # Get option chain
         self.get_all_contracts()
