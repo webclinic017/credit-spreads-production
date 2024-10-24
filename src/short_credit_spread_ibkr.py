@@ -1,4 +1,6 @@
 """
+Production code for Short Credit Spread strategy using IBKR API (ib_async)
+
 Reference: https://github.com/quantgalore/selling-volatility/blob/main/spread-production-tastytrade.py
 """
 import sys
@@ -58,8 +60,6 @@ class ShortCreditSpread:
         self.connect()
         # services
         self.alerts = Alerts(services) 
-
-        
 
         # tickers for polygon
         self.ticker = "I:SPX"
@@ -151,8 +151,6 @@ class ShortCreditSpread:
         hist_underlying_data['regime'] = hist_underlying_data.apply(lambda row: 1 if (row['c'] > row['1_mo_avg']) else 0, axis=1)
         self.trend_regime = hist_underlying_data['regime'].iloc[-1]
         cprint(f"trend regime: {self.trend_regime}", "green")
-
-        
 
     def compute_expected_move(self):
         # calculate expected move
